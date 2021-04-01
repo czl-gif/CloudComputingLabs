@@ -1,31 +1,90 @@
 #include <assert.h>
 #include <stdio.h>
-
+#include <pthread.h>
+#include <thread>
+#include <vector>
 #include <algorithm>
-
+#include <map>
+#include <iostream>
 #include "sudoku.h"
+using namespace std;
+__thread int board[N];
+__thread int write_num;
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t output_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t queue_mutex_write = PTHREAD_MUTEX_INITIALIZER;
 
-int board[N];
-int spaces[N];
-int nspaces;
-//int (*chess)[COL] = (int (*)[COL])board;
+map<int, vector<int> >puzzleSet;
+map<int, vector<int> >::iterator it;
+map<int, vector<int> >::iterator it_write;
+int (*chess)[COL] = (int (*)[COL])board;
 
-static void find_spaces()
+/*static void find_spaces()
 {
   nspaces = 0;
   for (int cell = 0; cell < N; ++cell) {
     if (board[cell] == 0)
       spaces[nspaces++] = cell;
   }
-}
+}*/
 
-void input(const char in[N])
+void solveSudoku()
 {
-  for (int cell = 0; cell < N; ++cell) {
-    board[cell] = in[cell] - '0';
-    assert(0 <= board[cell] && board[cell] <= NUM);
-  }
-  find_spaces();
+    bool (*solve)(int) = solve_sudoku_dancing_links;
+    pthread_mutex_lock(&queue_mutex);
+    if (it != puzzleSet.end())
+    {
+        vector<int> tmp = it->second;
+        copy(tmp.begin(), tmp.end(), board);
+        write_num = it->first;
+        it++;
+    }else {
+        pthread_mutex_unlock(&queue_mutex);
+        return;
+    }
+    pthread_mutex_unlock(&queue_mutex);
+    if (solve(0))
+    {
+        
+        vector<int> tmp(board, board + 81);
+        pthread_mutex_lock(&queue_mutex_write);
+        puzzleSet[write_num] = tmp;
+        total_solved++;
+        cout<<"solved::"<<total_solved<<endl;
+        pthread_mutex_unlock(&queue_mutex_write);
+        
+
+    }
+    return;
+}
+void output()
+{
+    it = puzzleSet.begin();
+    while (it != puzzleSet.end())
+    {
+        vector<int> tmp = it->second;
+        for (int i = 0; i < 81; i++)
+            cout << tmp[i];
+        cout << endl;
+        it++;
+    }
+    
+}
+/*void output(int num)
+{   
+    for (int i = 0; i < 81; i++)
+        cout << puzzleSet[num][i];
+    cout << endl;         
+}*/
+void input(const char in[N], int num)
+{
+    vector<int> tmp;
+    for (int cell = 0; cell < N; ++cell) {
+        tmp.push_back(in[cell] - '0');
+        //board[cell] = in[cell] - '0';
+        assert(0 <= tmp[cell] && tmp[cell] <= NUM);
+    }
+    puzzleSet.insert(pair<int, vector<int> >(num, tmp));
 }
 
 /*bool available(int guess, int cell)
