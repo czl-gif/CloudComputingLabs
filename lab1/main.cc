@@ -20,11 +20,11 @@ int64_t  now()
 }
 
 int total_solved = 0;
-
+int threadnum = 2;
 int main()
 {
     init_neighbors();
-    ThreadPool threadpool(THREADNUM0 - 1);
+    ThreadPool threadpool(threadnum);
     //string filename;
     char filename[128];
 
@@ -70,7 +70,7 @@ int main()
    it = puzzleSet.begin();
    int len = puzzleSet.size();
    int64_t start = now();
-   int m_len = len / 12;
+   int m_len = len / (threadnum + 1);
    //cout << "len::" << len <<endl;
    while (len > m_len)
    {
