@@ -50,7 +50,7 @@ void solveSudoku()
         pthread_mutex_lock(&queue_mutex_write);
         puzzleSet[write_num] = tmp;
         total_solved++;
-        cout<<"solved::"<<total_solved<<endl;
+        
         pthread_mutex_unlock(&queue_mutex_write);
         
 

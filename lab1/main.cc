@@ -91,7 +91,7 @@ int main()
    }
    int64_t end = now();
     sec += (end-start)/1000000.0;
-   cout<<"sol::"<<total_solved<<' '<<total<<endl;
+   
    output();
     printf("%f sec %f ms each %d\n", sec, 1000*sec/total, total_solved);
 
