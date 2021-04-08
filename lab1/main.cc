@@ -20,7 +20,7 @@ int64_t  now()
 }
 
 int total_solved = 0;
-int threadnum = 2;
+int threadnum = 0;
 int main()
 {
     init_neighbors();
@@ -53,6 +53,7 @@ int main()
         }
         //inputfile.open(filename, ios::in);
         //start = now();
+        int64_t start0 = now();
         while(fgets(puzzle, sizeof puzzle, fp) != NULL) {
             if(strlen(puzzle) >= N) {
                 
@@ -64,6 +65,9 @@ int main()
                 }*/
             }
         }
+        int64_t end0 = now();
+        sec += (end0-start0)/1000000.0;
+
         
 
    }
@@ -92,7 +96,8 @@ int main()
    int64_t end = now();
     sec += (end-start)/1000000.0;
    
-   output();
+   //output();
+   //cout << THREADNUM0 << endl;
     printf("%f sec %f ms each %d\n", sec, 1000*sec/total, total_solved);
 
 
