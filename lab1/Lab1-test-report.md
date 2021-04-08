@@ -62,3 +62,4 @@ CPU 资源充足时( CPU 核心数足够多,当前正在运行的进程 / 线程
 
 <div align="center"><img src="src/图2-2.png" alt="图2-2" title="图2-2" style="zoom:80%;" /></div>
 
+2.3硬件比较
