@@ -14,11 +14,11 @@
 using namespace std;
 
 int server_socket;
-char *ip = new char[25];
+char *ip = new char[45];
 int port = 0;
 int number_thread = 0;
 char proxy[255];
-int backlog = 100; //服务器监听请求缓存大小
+//int backlog = 100; //服务器监听请求缓存大小
 threadpool* executor;
 
 void init(int argc, char * const argv[])
@@ -32,6 +32,7 @@ void init(int argc, char * const argv[])
         {"ip", required_argument, NULL, 1},
         {"port", required_argument, NULL, 2},
         {"number-thread", required_argument, NULL, 3},
+        {"proxy", required_argument, NULL, 4},
     };
     while ((opt = getopt_long(argc, argv, string, long_options, &option_index)) != -1)
     {
@@ -47,6 +48,9 @@ void init(int argc, char * const argv[])
             break;
         case 3:
             number_thread = atoi(optarg);
+            break;
+        case 4:
+            strcpy(proxy, optarg);
             break;
         default:
             break;
