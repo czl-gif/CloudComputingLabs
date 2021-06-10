@@ -27,7 +27,8 @@ private:
     Command command;//命令信息
     //绑定接收连接的coordinator_socket;
     void init();
-    
+    vector<int> participants_commit_ID;
+    void commid_ID_init();
     void participant_work_init();
     //从新连接的socket解析出命令
     int RecvCommand(int conn_socket);
@@ -41,6 +42,10 @@ private:
     int send_message(int i, string s);
     //接收消息,返回接收到的消息的数目
     int recv_message(string s, int n, int timeout);
+    //接收participant的commmid_id
+    int recv_commid_id(int n, int timeout);
+    //对不一致的particpant进行恢复
+    void recovery();
     //处理超时的participant
     void ProcessTimeout();
     string get_message(int i);

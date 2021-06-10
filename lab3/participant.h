@@ -26,8 +26,11 @@ private:
     int send_message(int conn_socket, string s);
     void process(int conn_socket);
     //
+    void connect_coordinator();
     void init();
-
+    //构造内存语句，发送给coordinator
+    string get_memory_string();
+    void recovery(char * msg);
     void parse_message(char *msg);
     //下面三个函数是为了解析命令套用的
     int get_nextrn(char* msg, int l);

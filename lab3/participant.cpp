@@ -32,6 +32,25 @@ void participant::init()
         perror("participant_socket listen error!");
         exit(1);
     }
+    connect_coordinator();
+}
+void participant::connect_coordinator()
+{
+    struct sockaddr_in seraddr;
+    int clientfd;
+    if ((clientfd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        perror("create participant socket error!!!");
+        exit(1);
+    }
+    memset(&seraddr, 0, sizeof(seraddr));
+    seraddr.sin_family = AF_INET;
+    seraddr.sin_port = htons(coordinator_info.port);
+    seraddr.sin_addr.s_addr = inet_addr(coordinator_info.ip.c_str());
+    while(connect(clientfd, (struct sockaddr*)&seraddr, sizeof(seraddr)) != 0) {
+        cout << "connect coordinator error" << endl;
+    }
+    close(clientfd);
 }
 //构造函数，从配置文件中读取内容并初始化相应变量
 participant::participant(char * filename)
@@ -112,19 +131,21 @@ void participant::start()
             continue;
         }
         process(conn_sock);
+        
     }
 }
 void participant::process(int conn_socket)
 {
     char *s = new char[255];
     while(1) {
-        
+        memset(s, 0, 255);
         if(read(conn_socket, s, 255) > 0){
+            
             string buf = s;
             cout << "receve message from coordiantor:" << buf << endl;    
             if(buf == "Hello!") {
                 cout << "收到心跳包" << endl;
-                send_message(conn_socket, s);
+                send_message(conn_socket, to_string(commit_ID));
             }else if(s[0] == '*') {
                 parse_message(s);
                 if(command.Command_name == "GET") {
@@ -151,9 +172,22 @@ void participant::process(int conn_socket)
                 rollback();
                 send_message(conn_socket, "rollback_successed");
             }
+            else if(buf == "&") {
+                string s = get_memory_string();
+                send_message(conn_socket, s);
+            }
+            else if(s[0] == '#') {
+                s[0] = ' ';
+                recovery(s + 1);
+                send_message(conn_socket, "OK");
+            }
         }else {
             close(conn_socket);
             break;
+        }
+        cout << "内存信息如下："<<commit_ID << endl;
+        for(map<string, string>::iterator it = memory_new.begin(); it != memory_new.end(); it++) {
+            cout<< conn_socket << it ->first <<' ' << it->second << endl;
         }
     }
     delete s;
@@ -162,10 +196,16 @@ void participant::process(int conn_socket)
 string participant::execute_command()
 {
     back_up();
+    //cout << "执行命令"<<command. << command.value1 << "zhi:" << memory_new[command.value1] << endl;
     if(command.Command_name == "GET") {
         if(memory_new.find(command.value1) != memory_new.end()) {
             return memory_new[command.value1];
         }else {
+            cout << "请求键值=" << command.value1 << endl;
+            cout << "此时内存::"<< endl;
+            for(map<string, string>::iterator it = memory_new.begin(); it != memory_new.end(); it++) {
+                cout << it ->first <<' ' << it->second << endl;
+            }
             return "nil";
         }
     }
@@ -239,14 +279,12 @@ void participant::parse_message(char *msg)
             i = i + m + 3;
         }
     }
-    cout << "command name:" << command.Command_name <<' ' << command.value1<<' '<<command.value2<< endl;
-    for(int k = 0; k < command.values.size(); k++)
-        cout << command.values[k] << endl;
+    
 }
 int participant::send_message(int conn_socket, string s)
 {
     int len = write(conn_socket, s.c_str(), s.length());
-    cout << "send message to coordinator:" << s << endl;
+    cout << "send message to coordinator:" << s.c_str() << endl;
     return len;
 }
 
@@ -275,7 +313,34 @@ string participant::get_string(char * msg, int l, int r)
     }
     return res;
 }
-
+string participant::get_memory_string()
+{
+    string res = "#" + to_string(commit_ID) + "\r\n";
+    res += (to_string(memory_new.size()) + "\r\n");
+    for(map<string, string>::iterator it = memory_new.begin(); it != memory_new.end(); it++) {
+        res +=(it->first + "\r\n" + it->second + "\r\n");
+    }
+    return res;
+}
+void participant::recovery(char *msg)
+{
+    cout << "收到内存信息:" << endl;
+    cout << msg << endl;
+    stringstream ss(msg);
+    ss >> commit_ID;
+    int n;
+    ss >> n;
+    string s1, s2;
+    string s0;
+    memory_new.clear();
+    for(int i = 0; i < n; i++) {
+        ss >> s1;
+        getline(ss, s0);
+        getline(ss, s2);
+        cout<<"键值=" << s1 << ' ' << s2;
+        memory_new[s1] = s2;
+    }
+}
 participant::~participant()
 {
 

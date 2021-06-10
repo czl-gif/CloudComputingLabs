@@ -78,6 +78,9 @@ int main()
         {
             perror("send error");
         }
+        char buf0[255];
+        read(clientfd, buf0, 255);
+        cout << "read from :" << buf0 << endl;
     }
     
     close(clientfd);

@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <thread>
+#include <queue>
 using namespace std;
 
 //将socket描述
@@ -96,6 +97,12 @@ void coordinator::participant_work_init()
     for(int i = 0; i < participant_number; i++)
         participant_work.push_back(false);
 }
+void coordinator::commid_ID_init()
+{
+    participants_commit_ID.clear();
+    for(int i = 0; i < participant_number; i++)
+        participants_commit_ID.push_back(-1);
+}
 void coordinator::init()
 {
     coordinator_socket = socket(AF_INET, SOCK_STREAM , IPPROTO_TCP);
@@ -124,11 +131,11 @@ void coordinator::Heartbeat_detection(int mode)
 {
     set<int>::iterator it;
     struct sockaddr_in seraddr;
-    if (mode & 0x1) {
+    if (mode == 3 || mode == 5) {
         vector<thread> t;
         for(it = failed_participant.begin();it != failed_participant.end();) {
             int i = *it;
-            cout << "participant i =" << i << endl;
+           
             int clientfd;
             if ((clientfd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
             {
@@ -161,7 +168,6 @@ void coordinator::Heartbeat_detection(int mode)
             t[i].join();
         }
     }
-    cout << "succeed size0 = " << succeed_participant.size() << endl;
     if (mode == 2 || mode == 3 || mode == 5) {
         for(it = succeed_participant.begin();it != succeed_participant.end();) {
             int i = *it;
@@ -176,9 +182,10 @@ void coordinator::Heartbeat_detection(int mode)
             it++;
         }
         participant_work_init();
+        commid_ID_init();
         cout << "succeed size1 = " << succeed_participant.size() << endl;
         int n = succeed_participant.size();
-        if(recv_message("Hello!", n, 500000) != n) {
+        if(recv_commid_id(n, 500000) != n) {
             ProcessTimeout();
         }
 
@@ -256,7 +263,6 @@ int coordinator::RecvCommand(int conn_socket)
     if (len <= 0 || msg[0] != '*') {
         return 1;
     }
-    cout << "receve message:" << msg << endl;
     stringstream ss(msg + 1);
     int n;ss >> n;
     string m,s;
@@ -322,8 +328,14 @@ void coordinator::start()
     memset(&serv_addr, 0, sizeof(serv_addr));
     socklen_t sin_size = sizeof(struct sockaddr_in);
     int id = 0;
+    int order = 0;
     while(1) 
     {
+        order ++;
+        if(order >= 2) {
+            Heartbeat_detection(3);
+            order = 0;
+        }
         command.value1 = command.Command_name = command.value2 = "";
         command.values.clear();
         if(id >= participant_number) id -= participant_number;
@@ -335,8 +347,14 @@ void coordinator::start()
         else {
             cout << conn_sock << "connect!!!" << endl;
         }
-        RecvCommand(conn_sock);
+        
+
+        if(RecvCommand(conn_sock) == 1) {
+            Heartbeat_detection(3);
+            continue;
+        }
         cout << "succeed size = " << succeed_participant.size() << endl;
+        //Heartbeat_detection(3);
         if(succeed_participant.size() == 0) {
             string s = "-ERROR\r\n";
             send_client_message(conn_sock, s);
@@ -346,6 +364,7 @@ void coordinator::start()
             string s = get(command.value1);
             while(succeed_participant.find(id) == succeed_participant.end())
                 id++;
+            cout << "id=" << id << endl;
             send_message(id, s);
             
             string res;
@@ -512,7 +531,9 @@ string coordinator::get_message(int i)
         for(int i = 0; i < num; i++) {
             memset(buf, 0, 255);
             if(events[i].data.fd == connect_participant_pos_socket[i]) t = 0;
-            if(read(events[i].data.fd, buf, 255) > 0) {
+            int len;
+            if((len = read(events[i].data.fd, buf, 255)) > 0) {
+                buf[len] = '\0';
                 cout << "receve message from participant:" << buf << endl;
                 ev.data.fd = events[i].data.fd;
                 ev.events=EPOLLIN|EPOLLET;
@@ -563,7 +584,7 @@ int coordinator::recv_message(string s, int n, int timeout)
                 close(events[i].data.fd);
             }
         }
-        if(num == n){
+        if(num >= n){
             delete events;
             delete buf;
             return res;
@@ -574,6 +595,99 @@ int coordinator::recv_message(string s, int n, int timeout)
     delete events;
     delete buf;
     return res; 
+}
+
+int coordinator::recv_commid_id(int n, int timeout)
+{
+    struct epoll_event * events = new epoll_event[n];
+    struct epoll_event ev;
+    int num = 0;
+    int res = 0;
+    int t = 2;
+    char *buf = new char[255];
+    while(t--) {
+        num = epoll_wait(epollfd, events, n, 10);
+        cout << "num = " << num << endl;
+        for (int i = 0; i < num; i++) {
+            memset(buf, 0, 255);
+            if (read(events[i].data.fd, buf, 255) > 0) {
+                cout << "receve message from participant:" << buf << endl;
+                int k = atoi(buf);
+                participants_commit_ID[connect_participant_socket_pos[events[i].data.fd]] = k;
+                res++;
+                participant_work[connect_participant_socket_pos[events[i].data.fd]] = true;
+                
+                ev.data.fd = events[i].data.fd;
+                ev.events=EPOLLIN|EPOLLET;
+                epoll_ctl(epollfd,EPOLL_CTL_MOD,events[i].data.fd,&ev);
+            } else {
+                int k = connect_participant_socket_pos[events[i].data.fd];
+                succeed_participant.erase(k);
+                failed_participant.insert(k);
+                participants_commit_ID[connect_participant_socket_pos[events[i].data.fd]] = -1;
+                close(events[i].data.fd);
+            }
+        }
+        if(num == n){
+            t = 0;
+        }
+        if(t == 1)
+            usleep(timeout);
+    }
+    recovery();
+    delete events;
+    delete buf;
+    return res; 
+}
+void coordinator::recovery()
+{
+    while(1) {
+        if(participants_commit_ID.size() == 0) return;
+        int maxID = -1;
+        for(int i = 0; i < participants_commit_ID.size(); i++) {
+            if(participants_commit_ID[i] > maxID)
+                maxID = participants_commit_ID[i];
+        } 
+        if(maxID == -1) return;
+        queue <int> good;
+        queue <int> bad;
+        for(int i = 0; i < participants_commit_ID.size(); i++) {
+            if(participants_commit_ID[i] == -1) continue;
+            if(participants_commit_ID[i] == maxID) good.push(i);
+            else bad.push(i);
+        }
+        if(bad.empty()) return;
+        while(1) {
+            int k = bad.front();
+            send_message(good.front(), "&");
+            string s = get_message(good.front());
+            if(s == "") {
+                if(succeed_participant.find(good.front()) != succeed_participant.end()) {
+                    succeed_participant.erase(good.front());
+                    failed_participant.insert(good.front());
+                    close(connect_participant_pos_socket[good.front()]);
+                }
+                participants_commit_ID[good.front()] = -1;
+                good.pop();
+                if(good.size() == 0) break;
+            }else {
+                send_message(k, s);
+                s = get_message(k);
+                if(s == "") {
+                    if(succeed_participant.find(k) != succeed_participant.end()) {
+                        succeed_participant.erase(k);
+                        failed_participant.insert(k);
+                        close(connect_participant_pos_socket[k]);
+                    }
+                    participants_commit_ID[k] = -1;
+                }else {
+                    participants_commit_ID[k] = maxID;
+                }
+                bad.pop();
+                if(bad.size() == 0) return;
+            }
+        }
+    }
 }
 coordinator::~coordinator()
 {
