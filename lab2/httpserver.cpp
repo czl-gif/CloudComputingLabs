@@ -349,6 +349,8 @@ void process(int conn_sock)
             memset(messages, '\0', 65536 * sizeof(char));
         }
         if (len0 < 0 && !rest) break;*/
+        //close(conn_sock);
+        break;
     }
     delete []messages;
     close(conn_sock);

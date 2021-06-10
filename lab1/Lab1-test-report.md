@@ -60,7 +60,7 @@ ENV2: CPU 型号为Intel(R) Core(TM) i7-8750U CPU @ 2.20GHz, 2个CPU， 每个CP
 
 在实验中把大部分任务量都放入了线程池，考虑到主线程的空闲，给主线程分配了很少一部分任务量，可能没有绑核的原因(没找到c11绑核的函数)，当线程数大于CPU核数的时候，加速比有所下降，但下降不是很明显。
 
-<div align="center"><img src="src/图2-1.png" alt="图2-1" title="图2-1" style="zoom:80%;" /></div>
+<div align="center"><img src="src/图2-1.png" alt="图2-1" title="图2-1" style="zoom:35%;" /></div>
 
 ### 2.2不同代码实现性能比较
 
