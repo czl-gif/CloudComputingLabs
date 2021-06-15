@@ -9,7 +9,7 @@
 using namespace std;
 kvstore2pcsystem::kvstore2pcsystem(int argc, char* argv[])
 {
-    char *string = new char[2];
+    char *string_ = new char[2];
     filename = new char[255];
     mode = -1;
     static struct option long_options[]{
@@ -17,7 +17,7 @@ kvstore2pcsystem::kvstore2pcsystem(int argc, char* argv[])
     };
     int opt;
     int option_index = 0;
-    if((opt = getopt_long(argc, argv, string, long_options, &option_index)) != -1){
+    if((opt = getopt_long(argc, argv, string_, long_options, &option_index)) != -1){
         cout << "optarg = " << optarg << endl;
         strcpy(filename, optarg);
     }else {
