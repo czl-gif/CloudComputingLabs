@@ -566,6 +566,7 @@ int coordinator::recv_message(string s, int n, int timeout)
         num = epoll_wait(epollfd, events, n, 10);
         cout << "num = " << num << endl;
         for (int i = 0; i < num; i++) {
+            memset(buf, 0, s.length() + 5);
             if (read(events[i].data.fd, buf, s.length() + 5) > 0) {
                 cout << "receve message from participant:" << buf << endl;
                 if(strcmp(buf, s.c_str()) == 0) {
