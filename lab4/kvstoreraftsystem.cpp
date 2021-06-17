@@ -15,7 +15,9 @@ using namespace std;
 
 kvstoreraftsystem::kvstoreraftsystem(int argc, char *argv[])
 {
+    clientInfo.port = 8888;
     leaderID = -1;
+    commit_ID = 0;
     char *string_ = new char[2];
     char* filename = new char[255];
     mode = 0;
@@ -130,7 +132,7 @@ void  kvstoreraftsystem::addfd(int epfd, int fd, bool enable_et)
     ev.events = EPOLLIN;//表示对应的文件描述符可以读（包括对端SOCKET正常关闭）
     if (enable_et)
     {
-        ev.events = EPOLLIN;
+        ev.events = EPOLLIN | EPOLLET;
     }
     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
     //printf("fd added to epoll!\n\n");
@@ -158,6 +160,28 @@ int kvstoreraftsystem::connect_(int i)
     pos_connect_socket[i] = clientfd;
     return clientfd;
 } 
+int kvstoreraftsystem::connectclient()
+{
+    cout << "clientinfo:" << clientInfo.ip <<':' << clientInfo.port << endl;
+    struct sockaddr_in seraddr;
+    int clientfd;
+    if ((clientfd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        perror("create participant socket error!!!");
+        exit(1);
+    }
+    memset(&seraddr, 0, sizeof(seraddr));
+    seraddr.sin_family = AF_INET;
+    seraddr.sin_port = htons(clientInfo.port);
+    seraddr.sin_addr.s_addr = inet_addr(clientInfo.ip.c_str());
+    if (connect(clientfd, (struct sockaddr*)&seraddr, sizeof(seraddr)) != 0) 
+    {
+        cout << "connect client" << clientfd << "error1 !" << endl;
+        close(clientfd);
+        clientfd = -1;
+    }
+    return clientfd;
+}
 string kvstoreraftsystem::get_memory_string()
 {
     string res = "#" + to_string(commit_ID) + "\r\n";
@@ -182,9 +206,10 @@ string kvstoreraftsystem::read_msg(int socket)
 {
     struct timeval tv_out;
     tv_out.tv_sec = 1;
-    tv_out.tv_usec = 0;
-    setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &tv_out, sizeof(tv_out));
+    tv_out.tv_usec = 1000;
+    //setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &tv_out, sizeof(tv_out));
     char *buf = new char[255];
+    memset(buf, 0, 255);
     int len = read(socket, buf, 255);
     if(len <= 0) {
         close(socket);
@@ -199,7 +224,7 @@ string kvstoreraftsystem::read_msg(int socket)
 }
 int kvstoreraftsystem::write_msg(int socket, string s)
 {
-    int len = write(socket, s.c_str(), 255);
+    int len = write(socket, s.c_str(), s.length());
     if(len <= 0) {
         close(socket);
     }
@@ -217,13 +242,14 @@ int kvstoreraftsystem::recv_election_message(int epfd, string s, int n, int time
     char *buf = new char[s.length() + 5];
     while(t--) {
         num = epoll_wait(epfd, events, n, 10);
-        cout << "num = " << num << endl;
+        cout << "recvmessagenum = " << num << endl;
         for (int i = 0; i < num; i++) {
             if(events[i].data.fd == self_socket)
                 continue;
             memset(buf, 0, s.length() + 5);
             if (read(events[i].data.fd, buf, s.length() + 5) > 0) {
-                cout << "receve message from participant:" << buf << endl;
+                cout << "receve message from participant" << connect_socket_pos[events[i].data.fd]
+                <<":" << buf << endl;
                 if(strcmp(buf, s.c_str()) == 0) {
                     res++;
                     performers.insert(connect_socket_pos[events[i].data.fd]);
@@ -232,7 +258,7 @@ int kvstoreraftsystem::recv_election_message(int epfd, string s, int n, int time
                     p = -1;
                 }
                 ev.data.fd = events[i].data.fd;
-                ev.events=EPOLLIN;
+                ev.events=EPOLLIN | EPOLLET;
                 epoll_ctl(epollfd,EPOLL_CTL_MOD,events[i].data.fd,&ev);
             } else {
                 close(events[i].data.fd);
@@ -264,14 +290,16 @@ int kvstoreraftsystem::leader_recovery(int n, int timeout)
     map<int, int>count;
     count[commit_ID] = 1;
     while(t--) {
-        num = epoll_wait(epollfd, events, n, 10);
-        cout << "num = " << num << endl;
+        num = epoll_wait(epollfd, events, n, 100);
+        cout << "leader_recoverynum = " << num << endl;
         for (int i = 0; i < num; i++) {
             if(events[i].data.fd == self_socket)
                 continue;
             memset(buf, 0, 2550);
-            if (read(events[i].data.fd, buf, 255) > 0) {
+            if (read(events[i].data.fd, buf, 2550) > 0) {
+                cout << "收到内存信息："<< buf << endl;
                 if(buf[0] != '#') continue;
+                res++;
                 performers.insert(connect_socket_pos[events[i].data.fd]);
                 stringstream ss(buf + 1);
                 int CID;
@@ -281,7 +309,7 @@ int kvstoreraftsystem::leader_recovery(int n, int timeout)
                     recoverty(buf + 1);
                 }
                 ev.data.fd = events[i].data.fd;
-                ev.events=EPOLLIN;
+                ev.events=EPOLLIN | EPOLLET;
                 epoll_ctl(epollfd,EPOLL_CTL_MOD,events[i].data.fd,&ev);
             } else {
                 close(events[i].data.fd);
@@ -334,6 +362,9 @@ void kvstoreraftsystem::timeout_process()
 
 void kvstoreraftsystem::parse_command(char* msg)
 {
+    command.Command_name = "";
+    command.value1 = command.value2 = "";
+    command.values.clear();
     stringstream ss(msg);
     int n;ss >> n;
     string m,s;
@@ -363,6 +394,7 @@ void kvstoreraftsystem::parse_command(char* msg)
 }
 int kvstoreraftsystem::execute_command(string s, int fd)
 {
+    cout << "execute command:" << command.Command_name << endl;
     if(command.Command_name == "GET") {
         int k = 0;
         for(int i = 0; i < others_number; i++) {
@@ -371,11 +403,12 @@ int kvstoreraftsystem::execute_command(string s, int fd)
                 send_message(i, "memory");
             }
         }
+        cout << "执行命令k=" << k << endl;
         int res = leader_recovery(k, 1000000);
         if(res < k)
             timeout_process();
-        
-        if(res * 2 >= others_number) {
+        cout << "执行命令res = "<< res << endl;
+        if((res +  1) * 2 > others_number) {
             string str;
             if(memory_new.find(command.value1) != memory_new.end()) {
                 str = memory_new[command.value1];
@@ -405,6 +438,7 @@ int kvstoreraftsystem::execute_command(string s, int fd)
                 }
             }
             int res = leader_recovery(k, 1000000);
+            cout << "delres = " << res << endl;
             if(res < k)
                 timeout_process();
             if(res * 2 < others_number) {
@@ -418,12 +452,14 @@ int kvstoreraftsystem::execute_command(string s, int fd)
                 send_message(i, s);
             }
         }
-        int res = recv_election_message(epollfd, "ACK", k, 1000000);
+        cout << "执行命令k=" << k << endl;
+        int res = recv_election_message(epollfd, "ACK", k, 3000000);
         if(res < k)
             timeout_process();
+        cout << "执行命令res = "<< res << endl;
         if(command.Command_name == "SET") {
             
-            if(res * 2 >= others_number) {
+            if((res +  1) * 2 > others_number) {
                 update_memory();
                 write_msg(fd, "+OK\r\n");
             }else {
@@ -437,7 +473,7 @@ int kvstoreraftsystem::execute_command(string s, int fd)
             return res;
         }
         else if(command.Command_name == "DEL") {
-            if(res * 2 >= others_number) {
+            if((res +  1) * 2 > others_number) {
                 int len = update_memory();
                 write_msg(fd, ":" + to_string(len) + "\r\n");
             }else {
@@ -464,6 +500,7 @@ int kvstoreraftsystem::update_memory()
     commit_ID++;
     if(command.Command_name == "SET") {
         memory_new[command.value1] = command.value2;
+        cout << "更新内存信息：" << get_memory_string() << endl;
         return 0;
     }else if(command.Command_name == "DEL") {
         int res = 0;
@@ -489,15 +526,17 @@ void kvstoreraftsystem::election_process(int clientfd, struct sockaddr_in& serv_
 {
     if(mode == 0) {
         write_msg(clientfd, "vote");
+        mode = 1;
         string s = read_msg(clientfd);
         if(s == "") {
             //close(clientfd);
+            mode = 0;
             return;
-        }else if(s == "ACK"){
+        }else{
+            cout << "new leader!!!" << endl;
             int j;
             for(j = 0; j < others_number; j++) {
-                if(serv_addr.sin_addr.s_addr != inet_addr(OtherInfo[j].ip.c_str()))
-                    break;
+                if(s == to_string(OtherInfo[j].port)) break;
             }
             if(j >= others_number) {
                 close(clientfd);
@@ -509,8 +548,12 @@ void kvstoreraftsystem::election_process(int clientfd, struct sockaddr_in& serv_
                 pos_connect_socket[leaderID] = -1;
             } 
             leaderID = j;
-            
-            addfd(epollfd, clientfd, true);        
+            pos_connect_socket[leaderID] = clientfd;
+            connect_socket_pos[clientfd] = leaderID;
+            mode = 0;
+            addfd(epollfd, clientfd, true); 
+            string s = get_memory_string();
+            write_msg(clientfd, s);       
         }
     }
     else if(mode == 2) {
@@ -542,6 +585,15 @@ void kvstoreraftsystem::election_process(int clientfd, struct sockaddr_in& serv_
 }
 void kvstoreraftsystem::elect()
 {
+    if(mode == 2) {
+        for(int i = 0; i < others_number; i++) {
+                if(pos_connect_socket[i] != -1) {
+                    close(pos_connect_socket[i]);
+                    connect_socket_pos.erase(pos_connect_socket[i]);
+                    pos_connect_socket[i] = -1;
+                }
+            }
+    }
     mode = 1;
     if(leaderID != -1)
         close(pos_connect_socket[leaderID]);
@@ -557,10 +609,12 @@ void kvstoreraftsystem::elect()
             }   
         }
     }
-    if(n * 2 >= others_number) {
+    if((n + 1) * 2 > others_number) {
         performers.clear();
+        int m = n;
         n = recv_election_message(epollfd, "vote", n, 500000);
         if (n == -1) {
+            mode = 0;
             for(int i = 0; i < others_number; i++) {
                 if(pos_connect_socket[i] != -1) {
                     close(pos_connect_socket[i]);
@@ -569,13 +623,14 @@ void kvstoreraftsystem::elect()
                 }
             }
         }
-        else if(n * 2 >= others_number) {
+        else if((n + 1) * 2 > others_number) {
+            if(m < n) timeout_process();
             mode = 2;
             int k = 0;
             for(int i = 0; i < others_number; i++) {
                 if(pos_connect_socket[i] != -1) {
                     if(performers.find(i) != performers.end()) {
-                        send_message(i, "ACK");
+                        send_message(i, to_string(selfInfo.port));
                         k++;
                     }
                     else {
@@ -589,6 +644,8 @@ void kvstoreraftsystem::elect()
             if(leader_recovery(k,500000) < k)
                 timeout_process();
             //恢复
+        }else {
+            mode = 0;
         }
     }
     else {
@@ -599,8 +656,7 @@ void kvstoreraftsystem::elect()
                 connect_socket_pos.erase(pos_connect_socket[i]);
                 pos_connect_socket[i] = -1;  
             }
-        }
-                
+        }            
     }
 }
 void kvstoreraftsystem::execute(int num, struct epoll_event * events)
@@ -611,17 +667,21 @@ void kvstoreraftsystem::execute(int num, struct epoll_event * events)
         if(events[i].data.fd == self_socket) {
             memset(&serv_addr, 0, sizeof(serv_addr));
             int clientfd = accept(self_socket, (struct sockaddr*)&serv_addr, &sin_size);
+            getpeername(clientfd, (struct sockaddr*)&serv_addr, &sin_size);
             string s = read_msg(clientfd);
             if(s == "") continue;
             else if(s == "election") {
+                
                 election_process(clientfd, serv_addr);
             }
-            else if(s[0] == '*') {
+            else if(s[0] == '*' || s[0] == '&') {
                 if(mode == 0) {
                     if(leaderID != -1) {
                         int clientfd = connect_(leaderID);
+                        string s0 = inet_ntoa(serv_addr.sin_addr);
                         if(clientfd != -1) {
-                            write_msg(clientfd, s);
+                            write_msg(clientfd,"&" + s0 + "\r\n" + s);
+                            close(clientfd);
                             continue;
                         }
                     }
@@ -629,15 +689,35 @@ void kvstoreraftsystem::execute(int num, struct epoll_event * events)
                 }
                 if(mode == 2) {
                     //处理命令
+                    int p = 1;
+                    if(s[0] == '&') {
+                        clientInfo.ip = "";
+                        for(p = 1; p < s.length(); p++){
+                            if(s[p] == '\r') break;
+                            clientInfo.ip += s[p];
+                        }
+                        p += 3;
+                    }else {
+                        clientInfo.ip = inet_ntoa(serv_addr.sin_addr);
+                        p = 1;
+                    }
+
+                    close(clientfd);
                     char* msg = new char[s.length()];
-                    for(int i = 1; i < s.length(); i++)
-                        msg[i - 1] = s[i];
+                    memset(msg,0,s.length());
+                    for(int i = p; i < s.length(); i++)
+                        msg[i - p] = s[i];
                     msg[s.length()] = '\0';
+                    cout << "p = " << p << "msg = " << msg << endl;
                     parse_command(msg);
+                    s = msg;
                     delete msg;
-                    int res = execute_command(s, clientfd);
+                    clientfd = connectclient();
+                    
+                    int res = execute_command( "*" + s, clientfd);
                     if(res * 2 < others_number)
                         write_msg(clientfd, "-ERROR\r\n");
+                    close(clientfd);
                 }
             }
         }else {
@@ -655,11 +735,34 @@ void kvstoreraftsystem::execute(int num, struct epoll_event * events)
                 delete msg;
             }
             else if(s[0] == '*') {
+                char* msg = new char[s.length()];
+                for(int i = 1; i < s.length(); i++)
+                    msg[i - 1] = s[i];
+                msg[s.length()] = '\0';
+                parse_command(msg);
+                delete msg;
                 update_memory();
                 write_msg(events[i].data.fd, "ACK");
             }
             else if(s == "rollback"){
                 rollback();
+            }
+            else if(s == "") {//有断开时close的
+                cout << "有socket close"<< endl;
+                if(mode == 0) {
+                    cout << "leaderID = " << leaderID << "leader socket = "<< pos_connect_socket[leaderID]
+                    << "events[i].data.fd = "<< events[i].data.fd << endl;
+                    if(leaderID != -1 && pos_connect_socket[leaderID] == events[i].data.fd){
+                        pos_connect_socket[leaderID] = -1;
+                        connect_socket_pos.erase(events[i].data.fd);
+                        leaderID = -1;
+                    }
+                    close(events[i].data.fd);
+                }else if(mode == 2) {
+                    close(events[i].data.fd);
+                    pos_connect_socket[connect_socket_pos[events[i].data.fd]] = -1;
+                    connect_socket_pos.erase(events[i].data.fd);
+                }
             }
         }
     }
@@ -677,16 +780,27 @@ void kvstoreraftsystem::start()
     cout << selfInfo.ip << endl;
     while(1) {
         time_ = 0;
-        while(time_ < 2) {
+        while(time_ < 200) {
             srand((int)time(0));
-            time_ = rand() % 16;
+            time_ = rand() % 1600;
         }
-        time_ *= 1000;
+        int time0 = 0;
+        while(time0 <= 300){
+            srand((int)time(0));
+            time0 = rand() % 1000;
+        }
+        time_ *= time0;
+        if(commit_ID == 0) time_ /= 10;
         if(mode == 2) {
-            cout << "I'm leader:" << selfInfo.ip << endl;
+            time_ *= 10;
+            cout << "I'm leader:" << selfInfo.ip<< ':'<< selfInfo.port << endl;
         }
         cout << "time_ = " << time_ << endl;
+        cout << "leaderID = " << leaderID << endl; 
+        cout << "mode =" << mode << endl;
+        memset(events, 0, sizeof(struct epoll_event) * (others_number + 5)); 
         int num = epoll_wait(epollfd, events, others_number + 5, time_);
+        cout << "mainnum =" << num << endl;
         if(num <= 0) {
             elect(); 
         }

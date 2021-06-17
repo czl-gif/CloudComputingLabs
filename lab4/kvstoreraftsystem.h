@@ -35,6 +35,7 @@ private:
     map<string, string> memory_old;
     map<string, string> memory_new;
     Info selfInfo;//自己的IP和port,在配置文件中用coordinator表明是自己的信息
+    Info clientInfo;
     vector<Info> OtherInfo;//其他所有成员的IP和port，包括leader
     set<int> performers;
     map<int, int>pos_connect_socket;
@@ -43,6 +44,7 @@ private:
     void init();
     void addfd(int epfd, int fd, bool enable_et);
     int connect_(int i);
+    int connectclient();
     //构造内存语句，发送给coordinator
     string get_memory_string();
     int send_message(int i, string s);
